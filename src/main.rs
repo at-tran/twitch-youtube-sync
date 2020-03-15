@@ -2,6 +2,7 @@ use regex::Regex;
 use reqwest::blocking;
 use serde_urlencoded;
 use std::collections::HashMap;
+use std::fs;
 use std::process::{Command, Stdio};
 
 fn main() {
@@ -46,6 +47,7 @@ fn get_m3u8_url(video_id: &str, token: &str, sig: &str) -> String {
 }
 
 fn download_video(video_id: &str, m3u8_url: &str) {
+    let _ = fs::create_dir("videos");
     Command::new("ffmpeg")
         .args(&[
             "-i",
@@ -54,9 +56,12 @@ fn download_video(video_id: &str, m3u8_url: &str) {
             "copy",
             "-bsf:a",
             "aac_adtstoasc",
-            &format!("{}.mp4", video_id),
+            "-crf",
+            "17",
+            "-y",
+            &format!("videos/{}.mp4", video_id),
         ])
-        .stdout(Stdio::inherit())
-        .output()
+        .stderr(Stdio::piped())
+        .status()
         .unwrap();
 }
