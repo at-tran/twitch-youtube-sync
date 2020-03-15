@@ -6,7 +6,9 @@ edition = "2018"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-reqwest = "0.10.4"
+reqwest = { version = "0.10", features = ["blocking", "json"] }
+regex = "1"
+serde_urlencoded = "0.6.1"
 
 [profile.release]
 # This makes the compiled code faster and smaller, but it makes compiling slower,
