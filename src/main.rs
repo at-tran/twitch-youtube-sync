@@ -19,7 +19,8 @@ fn main() {
     // download_video(video_id, &m3u8_url);
     let client_secret = get_client_secrets();
     let auth = get_auth_token(&client_secret, token_filepath);
-    upload_video(&auth.access_token, &video_id);
+    println!("Auth token: {}", auth.access_token);
+    upload_video(&auth.access_token, video_id);
 }
 
 fn get_client_id() -> String {
@@ -197,7 +198,22 @@ fn get_auth_token_from_file(
 }
 
 fn upload_video(auth_token: &str, video_id: &str) {
-    let uri = get_upload_session_uri(auth_token, "haha", 300);
+    let filepath = format!("videos/{}.mp4", video_id);
+    let metadata = fs::metadata(&filepath).unwrap();
+
+    let upload_uri = get_upload_session_uri(auth_token, video_id, metadata.len() as u32);
+    let file = File::open(&filepath).unwrap();
+
+    println!("Starting upload");
+    let client = reqwest::blocking::Client::new();
+    let res = client
+        .post(&upload_uri)
+        .bearer_auth(auth_token)
+        .header(CONTENT_TYPE, "video/*")
+        .header(CONTENT_LENGTH, metadata.len())
+        .body("")
+        .send();
+    println!("{:?}", res);
 }
 
 fn get_upload_session_uri(auth_token: &str, video_name: &str, video_size: u32) -> String {
@@ -216,7 +232,10 @@ fn get_upload_session_uri(auth_token: &str, video_name: &str, video_size: u32) -
     .to_string();
     let res = client
         .post("https://www.googleapis.com/upload/youtube/v3/videos")
-        .query(&[("uploadType", "resumable"), ("part", "snippet,status")])
+        .query(&[
+            ("uploadType", "resumable"),
+            ("part", "snippet,status,contentDetails"),
+        ])
         .bearer_auth(auth_token)
         .header(CONTENT_TYPE, "application/json; charset=UTF-8")
         .header(CONTENT_LENGTH, req_body.len())
@@ -225,6 +244,7 @@ fn get_upload_session_uri(auth_token: &str, video_name: &str, video_size: u32) -
         .body(req_body)
         .send()
         .unwrap();
+    println!("{:?}", res);
     let location = res
         .headers()
         .get(LOCATION)
