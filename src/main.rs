@@ -1,23 +1,25 @@
 use regex::Regex;
 use reqwest::blocking;
-use reqwest::header::CONTENT_TYPE;
+use reqwest::header::{CONTENT_LANGUAGE, CONTENT_LENGTH, CONTENT_TYPE, LOCATION};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use serde_urlencoded;
 use std::collections::HashMap;
+use std::error::Error;
+use std::fs::File;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use std::{fs, thread};
 
 fn main() {
     let video_id = "567314621";
+    let token_filepath = "token.json";
     // let (token, sig) = get_access_token(&get_client_id(), video_id);
     // let m3u8_url = get_m3u8_url(video_id, &token, &sig);
     // download_video(video_id, &m3u8_url);
     let client_secret = get_client_secrets();
-    let auth_token = get_auth_token(&client_secret);
-    println!("{:?}", auth_token);
-    // get_upload_session_uri(&api_key, &video_id);
+    let auth = get_auth_token(&client_secret, token_filepath);
+    upload_video(&auth.access_token, &video_id);
 }
 
 fn get_client_id() -> String {
@@ -102,10 +104,24 @@ struct AuthInfo {
     expires_in: u32,
     scope: String,
     token_type: String,
+    #[serde(default)]
     refresh_token: String,
 }
 
-fn get_auth_token(client_secret: &ClientSecret) -> AuthInfo {
+fn get_auth_token(client_secret: &ClientSecret, filepath: &str) -> AuthInfo {
+    if let Ok(auth) = get_auth_token_from_file(client_secret, filepath) {
+        auth
+    } else {
+        let auth = get_auth_token_from_server(client_secret);
+        let _ = fs::write(
+            filepath,
+            format!(r#"{{ refresh_token": "{}" }}"#, auth.refresh_token),
+        );
+        auth
+    }
+}
+
+fn get_auth_token_from_server(client_secret: &ClientSecret) -> AuthInfo {
     let client = reqwest::blocking::Client::new();
     let res: UserCodeInfo = client
         .post("https://oauth2.googleapis.com/device/code")
@@ -148,29 +164,73 @@ fn get_auth_token(client_secret: &ClientSecret) -> AuthInfo {
     panic!("User did not enter code");
 }
 
-fn get_upload_session_uri(api_key: &str, video_id: &str) {
+fn get_auth_token_from_file(
+    client_secret: &ClientSecret,
+    filepath: &str,
+) -> Result<AuthInfo, Box<dyn Error>> {
+    let file = fs::File::open(filepath)?;
+    let json: Value = serde_json::from_reader(file)?;
+    let refresh_token = if let Value::String(s) = &json["refresh_token"] {
+        s
+    } else {
+        panic!("refresh_token is must be a string");
+    };
+
+    let client = reqwest::blocking::Client::new();
+    let res: AuthInfo = client
+        .post("https://oauth2.googleapis.com/token")
+        .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .body(format!(
+            "client_id={}&\
+                client_secret={}&\
+                refresh_token={}&\
+                grant_type=refresh_token",
+            client_secret.client_id, client_secret.client_secret, refresh_token
+        ))
+        .send()?
+        .json()?;
+
+    Ok(AuthInfo {
+        refresh_token: refresh_token.clone(),
+        ..res
+    })
+}
+
+fn upload_video(auth_token: &str, video_id: &str) {
+    let uri = get_upload_session_uri(auth_token, "haha", 300);
+}
+
+fn get_upload_session_uri(auth_token: &str, video_name: &str, video_size: u32) -> String {
     let client = reqwest::blocking::Client::new();
     let req_body = json!({
       "snippet": {
-        "title": video_id,
+        "title": video_name,
         "description": "This is a description of my video",
         "tags": ["cool", "video", "more keywords"],
-        "categoryId": 22
+        "categoryId": 20
       },
       "status": {
-        "privacyStatus": "unlisted",
-        "embeddable": true,
-        "license": "youtube"
+        "privacyStatus": "private",
       }
     })
     .to_string();
     let res = client
         .post("https://www.googleapis.com/upload/youtube/v3/videos")
-        .bearer_auth(api_key)
+        .query(&[("uploadType", "resumable"), ("part", "snippet,status")])
+        .bearer_auth(auth_token)
         .header(CONTENT_TYPE, "application/json; charset=UTF-8")
-        .header("X-Upload-Content-Length", "300")
+        .header(CONTENT_LENGTH, req_body.len())
+        .header("X-Upload-Content-Length", video_size)
         .header("X-Upload-Content-Type", "video/*")
         .body(req_body)
-        .send();
-    println!("{:?}", res);
+        .send()
+        .unwrap();
+    let location = res
+        .headers()
+        .get(LOCATION)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    location
 }
