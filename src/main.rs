@@ -1,19 +1,22 @@
 use regex::Regex;
 use reqwest::blocking;
 use reqwest::header::CONTENT_TYPE;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use serde_urlencoded;
 use std::collections::HashMap;
-use std::fs;
 use std::process::{Command, Stdio};
+use std::time::Duration;
+use std::{fs, thread};
 
 fn main() {
     let video_id = "567314621";
     // let (token, sig) = get_access_token(&get_client_id(), video_id);
     // let m3u8_url = get_m3u8_url(video_id, &token, &sig);
     // download_video(video_id, &m3u8_url);
-    let (client_id, client_secret) = get_client_secrets();
-    let auth_token = get_auth_token(&client_id);
+    let client_secret = get_client_secrets();
+    let auth_token = get_auth_token(&client_secret);
+    println!("{:?}", auth_token);
     // get_upload_session_uri(&api_key, &video_id);
 }
 
@@ -70,41 +73,79 @@ fn download_video(video_id: &str, m3u8_url: &str) {
         .unwrap();
 }
 
-fn get_client_secrets() -> (String, String) {
+#[derive(Deserialize, Debug)]
+struct ClientSecret {
+    client_id: String,
+    client_secret: String,
+}
+
+fn get_client_secrets() -> ClientSecret {
     let filepath = "client_secrets.json";
     let file = fs::File::open(filepath).expect(&format!("Cannot find {}", filepath));
     let json: Value =
         serde_json::from_reader(file).expect(&format!("{} does not contain valid json", filepath));
-
-    (
-        get_string_from_value(&json["web"]["client_id"]),
-        get_string_from_value(&json["web"]["client_secret"]),
-    )
+    serde_json::from_value(json["web"].clone()).unwrap()
 }
 
-fn get_string_from_value(v: &Value) -> String {
-    if let Value::String(s) = &v {
-        s.clone()
-    } else {
-        panic!("{} is not a string", v)
-    }
+#[derive(Deserialize, Debug)]
+struct UserCodeInfo {
+    device_code: String,
+    user_code: String,
+    verification_url: String,
+    expires_in: u32,
+    interval: u32,
 }
 
-fn get_auth_token(client_id: &str) -> String {
+#[derive(Deserialize, Debug)]
+struct AuthInfo {
+    access_token: String,
+    expires_in: u32,
+    scope: String,
+    token_type: String,
+    refresh_token: String,
+}
+
+fn get_auth_token(client_secret: &ClientSecret) -> AuthInfo {
     let client = reqwest::blocking::Client::new();
-    let res = client
+    let res: UserCodeInfo = client
         .post("https://oauth2.googleapis.com/device/code")
         .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
         .body(format!(
             "client_id={}&scope=https://www.googleapis.com/auth/youtube.upload",
-            client_id
+            client_secret.client_id
         ))
         .send()
         .unwrap()
-        .text()
+        .json()
         .unwrap();
-    println!("{:?}", res);
-    "haha".to_string()
+
+    println!(
+        "Please go to {} and enter code: {}",
+        res.verification_url, res.user_code
+    );
+
+    for _ in 1..(res.expires_in / res.interval) {
+        thread::sleep(Duration::from_secs(res.interval as u64));
+
+        let mut res = client
+            .post("https://oauth2.googleapis.com/token")
+            .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(format!(
+                "client_id={}&\
+                client_secret={}&\
+                device_code={}&\
+                grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code",
+                client_secret.client_id, client_secret.client_secret, res.device_code
+            ))
+            .send()
+            .unwrap();
+
+        if res.status().is_success() {
+            return res.json().unwrap();
+        }
+    }
+
+    panic!("User did not enter code");
 }
 
 fn get_upload_session_uri(api_key: &str, video_id: &str) {
