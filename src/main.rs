@@ -116,7 +116,7 @@ fn get_auth_token(client_secret: &ClientSecret, filepath: &str) -> AuthInfo {
         let auth = get_auth_token_from_server(client_secret);
         let _ = fs::write(
             filepath,
-            format!(r#"{{ refresh_token": "{}" }}"#, auth.refresh_token),
+            format!(r#"{{ "refresh_token": "{}" }}"#, auth.refresh_token),
         );
         auth
     }
@@ -209,9 +209,10 @@ fn upload_video(auth_token: &str, video_id: &str) {
     let res = client
         .post(&upload_uri)
         .bearer_auth(auth_token)
-        .header(CONTENT_TYPE, "video/*")
+        .header(CONTENT_TYPE, "application/octet-stream")
         .header(CONTENT_LENGTH, metadata.len())
-        .body("")
+        .timeout(Duration::from_secs(36000))
+        .body(file)
         .send();
     println!("{:?}", res);
 }
@@ -240,11 +241,10 @@ fn get_upload_session_uri(auth_token: &str, video_name: &str, video_size: u32) -
         .header(CONTENT_TYPE, "application/json; charset=UTF-8")
         .header(CONTENT_LENGTH, req_body.len())
         .header("X-Upload-Content-Length", video_size)
-        .header("X-Upload-Content-Type", "video/*")
+        .header("X-Upload-Content-Type", "application/octet-stream")
         .body(req_body)
         .send()
         .unwrap();
-    println!("{:?}", res);
     let location = res
         .headers()
         .get(LOCATION)
