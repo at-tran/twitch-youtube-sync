@@ -1,6 +1,6 @@
 use regex::Regex;
 use reqwest::blocking;
-use reqwest::header::{CONTENT_LANGUAGE, CONTENT_LENGTH, CONTENT_TYPE, LOCATION};
+use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE, LOCATION};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use serde_urlencoded;
@@ -12,11 +12,11 @@ use std::time::Duration;
 use std::{fs, thread};
 
 fn main() {
-    let video_id = "567314621";
+    let video_id = "571149832";
     let token_filepath = "token.json";
-    // let (token, sig) = get_access_token(&get_client_id(), video_id);
-    // let m3u8_url = get_m3u8_url(video_id, &token, &sig);
-    // download_video(video_id, &m3u8_url);
+    let (token, sig) = get_access_token(&get_client_id(), video_id);
+    let m3u8_url = get_m3u8_url(video_id, &token, &sig);
+    download_video(video_id, &m3u8_url);
     let client_secret = get_client_secrets();
     let auth = get_auth_token(&client_secret, token_filepath);
     println!("Auth token: {}", auth.access_token);
@@ -144,7 +144,7 @@ fn get_auth_token_from_server(client_secret: &ClientSecret) -> AuthInfo {
     for _ in 1..(res.expires_in / res.interval) {
         thread::sleep(Duration::from_secs(res.interval as u64));
 
-        let mut res = client
+        let res = client
             .post("https://oauth2.googleapis.com/token")
             .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
             .body(format!(
@@ -204,17 +204,20 @@ fn upload_video(auth_token: &str, video_id: &str) {
     let upload_uri = get_upload_session_uri(auth_token, video_id, metadata.len() as u32);
     let file = File::open(&filepath).unwrap();
 
-    println!("Starting upload");
+    println!("Starting upload with URI: {}", upload_uri);
     let client = reqwest::blocking::Client::new();
     let res = client
         .post(&upload_uri)
         .bearer_auth(auth_token)
         .header(CONTENT_TYPE, "application/octet-stream")
         .header(CONTENT_LENGTH, metadata.len())
-        .timeout(Duration::from_secs(36000))
+        .timeout(Duration::from_secs(3600 * 15))
         .body(file)
         .send();
     println!("{:?}", res);
+    if let Ok(res) = res {
+        println!("{:?}", res.text());
+    }
 }
 
 fn get_upload_session_uri(auth_token: &str, video_name: &str, video_size: u32) -> String {
