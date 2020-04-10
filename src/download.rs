@@ -1,13 +1,29 @@
+use crate::video::Video;
 use regex::Regex;
 use reqwest::blocking::{self, Client};
 use std::collections::HashMap;
 use std::fs;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-pub fn download_twitch_video(video_id: &str) {
+const VIDEOS_FOLDER: &str = "videos";
+
+pub fn download_twitch_video(video_id: &str) -> Video {
     let (token, sig) = get_access_token(&get_client_id(), video_id);
     let m3u8_url = get_m3u8_url(video_id, &token, &sig);
-    download_video(video_id, &m3u8_url);
+
+    let path = PathBuf::from(&format!("{}/{}.mp4", VIDEOS_FOLDER, video_id));
+
+    download_video(&m3u8_url, &path);
+
+    let size = fs::metadata(&path).unwrap().len();
+
+    Video {
+        name: video_id.to_string(),
+        description: "This is my description".to_string(),
+        path,
+        size,
+    }
 }
 
 fn get_client_id() -> String {
@@ -42,8 +58,8 @@ fn get_m3u8_url(video_id: &str, token: &str, sig: &str) -> String {
     )
 }
 
-fn download_video(video_id: &str, m3u8_url: &str) {
-    let _ = fs::create_dir("videos");
+fn download_video(m3u8_url: &str, path: &PathBuf) {
+    let _ = fs::create_dir_all(path.parent().unwrap());
     Command::new("ffmpeg")
         .args(&[
             "-i",
@@ -55,7 +71,7 @@ fn download_video(video_id: &str, m3u8_url: &str) {
             "-crf",
             "17",
             "-y",
-            &format!("videos/{}.mp4", video_id),
+            path.to_str().unwrap(),
         ])
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

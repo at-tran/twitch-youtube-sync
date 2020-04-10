@@ -1,3 +1,4 @@
+use crate::video::Video;
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE, LOCATION};
 use serde::Deserialize;
@@ -5,28 +6,24 @@ use serde_json::{json, Value};
 use std::error::Error;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
+use std::path::Path;
 use std::time::Duration;
 use std::{fs, thread};
 
 pub struct UploadSession {
-    video_name: String,
-    filepath: String,
-    filesize: u64,
+    video: Video,
     auth_token: String,
     upload_uri: String,
     client: Client,
 }
 
 impl UploadSession {
-    pub fn new(video_name: &str, filepath: &str, token_filepath: &str) -> UploadSession {
-        let client_secret = get_client_secrets();
-        let filesize = fs::metadata(filepath).unwrap().len();
-        let auth_token = get_auth_token(&client_secret, token_filepath);
-        let upload_uri = UploadSession::get_upload_session_uri(video_name, &auth_token, filesize);
+    pub fn new<P: AsRef<Path>>(video: Video, token_filepath: P) -> UploadSession {
+        let auth_token = get_auth_token(token_filepath.as_ref());
+        let upload_uri = UploadSession::get_upload_session_uri(&video, &auth_token);
+
         UploadSession {
-            video_name: video_name.to_string(),
-            filepath: filepath.to_string(),
-            filesize,
+            video,
             auth_token,
             upload_uri,
             client: Client::new(),
@@ -67,39 +64,39 @@ impl UploadSession {
             .post(&self.upload_uri)
             .bearer_auth(&self.auth_token)
             .header(CONTENT_LENGTH, 0)
-            .header("Content-Range", &format!("bytes */{}", self.filesize))
+            .header("Content-Range", &format!("bytes */{}", self.video.size))
             .send()
             .unwrap()
     }
 
     fn send_upload(&self, start_index: u64) {
-        let mut file = File::open(&self.filepath).unwrap();
+        let mut file = File::open(&self.video.path).unwrap();
         file.seek(SeekFrom::Start(start_index)).unwrap();
 
         let _ = self
             .client
             .put(&self.upload_uri)
             .bearer_auth(&self.auth_token)
-            .header(CONTENT_LENGTH, start_index - self.filesize)
+            .header(CONTENT_LENGTH, start_index - self.video.size)
             .header(
                 "Content-Range",
                 &format!(
                     "bytes {}-{}/{}",
                     start_index,
-                    self.filesize - 1,
-                    self.filesize
+                    self.video.size - 1,
+                    self.video.size
                 ),
             )
             .body(file)
             .send();
     }
 
-    fn get_upload_session_uri(video_name: &str, auth_token: &str, filesize: u64) -> String {
+    fn get_upload_session_uri(video: &Video, auth_token: &str) -> String {
         let client = Client::new();
         let req_body = json!({
           "snippet": {
-            "title": video_name,
-            "description": "This is a description of my video",
+            "title": &video.name,
+            "description": &video.description,
             "tags": ["cool", "video", "more keywords"],
             "categoryId": 20
           },
@@ -117,7 +114,7 @@ impl UploadSession {
             .bearer_auth(auth_token)
             .header(CONTENT_TYPE, "application/json; charset=UTF-8")
             .header(CONTENT_LENGTH, req_body.len())
-            .header("X-Upload-Content-Length", filesize)
+            .header("X-Upload-Content-Length", video.size)
             .header("X-Upload-Content-Type", "application/octet-stream")
             .body(req_body)
             .send()
@@ -164,11 +161,12 @@ struct AuthInfo {
     refresh_token: String,
 }
 
-fn get_auth_token(client_secret: &ClientSecret, filepath: &str) -> String {
-    if let Ok(auth) = get_auth_token_from_file(client_secret, filepath) {
+fn get_auth_token(filepath: &Path) -> String {
+    let client_secret = get_client_secrets();
+    if let Ok(auth) = get_auth_token_from_file(&client_secret, filepath) {
         auth.access_token
     } else {
-        let auth = get_auth_token_from_server(client_secret);
+        let auth = get_auth_token_from_server(&client_secret);
         let _ = fs::write(
             filepath,
             format!(r#"{{ "refresh_token": "{}" }}"#, auth.refresh_token),
@@ -222,7 +220,7 @@ fn get_auth_token_from_server(client_secret: &ClientSecret) -> AuthInfo {
 
 fn get_auth_token_from_file(
     client_secret: &ClientSecret,
-    filepath: &str,
+    filepath: &Path,
 ) -> Result<AuthInfo, Box<dyn Error>> {
     let file = fs::File::open(filepath)?;
     let json: Value = serde_json::from_reader(file)?;
