@@ -216,7 +216,7 @@ fn upload_video(auth_token: &str, video_id: &str) {
                 println!("Upload interrupted. Resuming.");
                 let mut continue_index: u64 = 0;
                 if let Some(range) = upload_status.headers().get("Range") {
-                    continue_index = range.to_str().unwrap()[2..].parse::<u64>().unwrap() + 1;
+                    continue_index = range.to_str().unwrap()[8..].parse::<u64>().unwrap() + 1;
                 }
                 send_upload(
                     auth_token,
