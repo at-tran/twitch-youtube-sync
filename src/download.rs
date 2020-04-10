@@ -3,16 +3,14 @@ use regex::Regex;
 use reqwest::blocking::{self, Client};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
-const VIDEOS_FOLDER: &str = "videos";
-
-pub fn download_twitch_video(video_id: &str) -> Video {
+pub fn download_twitch_video<P: AsRef<Path>>(video_id: &str, save_folder: P) -> Video {
     let (token, sig) = get_access_token(&get_client_id(), video_id);
     let m3u8_url = get_m3u8_url(video_id, &token, &sig);
 
-    let path = PathBuf::from(&format!("{}/{}.mp4", VIDEOS_FOLDER, video_id));
+    let path = save_folder.as_ref().join(video_id).with_extension("mp4");
 
     download_video(&m3u8_url, &path);
 
@@ -58,7 +56,7 @@ fn get_m3u8_url(video_id: &str, token: &str, sig: &str) -> String {
     )
 }
 
-fn download_video(m3u8_url: &str, path: &PathBuf) {
+fn download_video(m3u8_url: &str, path: &Path) {
     let _ = fs::create_dir_all(path.parent().unwrap());
     Command::new("ffmpeg")
         .args(&[

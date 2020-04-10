@@ -40,11 +40,14 @@ impl UploadSession {
 
             match upload_status.status().as_u16() {
                 308 => {
-                    println!("Upload interrupted. Resuming.");
                     let mut continue_index: u64 = 0;
                     if let Some(range) = upload_status.headers().get("Range") {
                         continue_index = range.to_str().unwrap()[8..].parse::<u64>().unwrap() + 1;
                     }
+                    println!(
+                        "Upload interrupted. Resuming from byte {}/{}.",
+                        continue_index, self.video.size
+                    );
                     self.send_upload(continue_index);
                 }
                 201 => {
@@ -97,8 +100,8 @@ impl UploadSession {
           "snippet": {
             "title": &video.name,
             "description": &video.description,
-            "tags": ["cool", "video", "more keywords"],
-            "categoryId": 20
+            "tags": ["gaming", "twitch", "live stream"],
+            "categoryId": 20 // Gaming
           },
           "status": {
             "privacyStatus": "private",
