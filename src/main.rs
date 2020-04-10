@@ -1,5 +1,5 @@
 use regex::Regex;
-use reqwest::blocking;
+use reqwest::blocking::{self, Client, Response};
 use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE, LOCATION};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -7,19 +7,19 @@ use serde_urlencoded;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use std::{fs, thread};
 
 fn main() {
-    let video_id = "571149832";
+    let video_id = "548819121";
     let token_filepath = "token.json";
-    let (token, sig) = get_access_token(&get_client_id(), video_id);
-    let m3u8_url = get_m3u8_url(video_id, &token, &sig);
-    download_video(video_id, &m3u8_url);
+    // let (token, sig) = get_access_token(&get_client_id(), video_id);
+    // let m3u8_url = get_m3u8_url(video_id, &token, &sig);
+    // download_video(video_id, &m3u8_url);
     let client_secret = get_client_secrets();
     let auth = get_auth_token(&client_secret, token_filepath);
-    println!("Auth token: {}", auth.access_token);
     upload_video(&auth.access_token, video_id);
 }
 
@@ -32,7 +32,7 @@ fn get_client_id() -> String {
 }
 
 fn get_access_token(client_id: &str, video_id: &str) -> (String, String) {
-    let client = reqwest::blocking::Client::new();
+    let client = Client::new();
     let mut resp = client
         .get(&format!(
             "https://api.twitch.tv/api/vods/{}/access_token",
@@ -70,8 +70,8 @@ fn download_video(video_id: &str, m3u8_url: &str) {
             "-y",
             &format!("videos/{}.mp4", video_id),
         ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
         .status()
         .unwrap();
 }
@@ -123,7 +123,7 @@ fn get_auth_token(client_secret: &ClientSecret, filepath: &str) -> AuthInfo {
 }
 
 fn get_auth_token_from_server(client_secret: &ClientSecret) -> AuthInfo {
-    let client = reqwest::blocking::Client::new();
+    let client = Client::new();
     let res: UserCodeInfo = client
         .post("https://oauth2.googleapis.com/device/code")
         .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
@@ -177,7 +177,7 @@ fn get_auth_token_from_file(
         panic!("refresh_token is must be a string");
     };
 
-    let client = reqwest::blocking::Client::new();
+    let client = Client::new();
     let res: AuthInfo = client
         .post("https://oauth2.googleapis.com/token")
         .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
@@ -199,29 +199,86 @@ fn get_auth_token_from_file(
 
 fn upload_video(auth_token: &str, video_id: &str) {
     let filepath = format!("videos/{}.mp4", video_id);
-    let metadata = fs::metadata(&filepath).unwrap();
+    let file_size = fs::metadata(&filepath).unwrap().len();
 
-    let upload_uri = get_upload_session_uri(auth_token, video_id, metadata.len() as u32);
-    let file = File::open(&filepath).unwrap();
+    let upload_uri = get_upload_session_uri(auth_token, video_id, file_size);
 
-    println!("Starting upload with URI: {}", upload_uri);
-    let client = reqwest::blocking::Client::new();
-    let res = client
-        .post(&upload_uri)
-        .bearer_auth(auth_token)
-        .header(CONTENT_TYPE, "application/octet-stream")
-        .header(CONTENT_LENGTH, metadata.len())
-        .timeout(Duration::from_secs(3600 * 15))
-        .body(file)
-        .send();
-    println!("{:?}", res);
-    if let Ok(res) = res {
-        println!("{:?}", res.text());
+    // println!("Starting upload with URI: {}", upload_uri);
+    let client = Client::new();
+    send_upload(auth_token, &upload_uri, 0, file_size, &filepath, &client);
+    // println!("{:?}", res);
+
+    loop {
+        let upload_status = check_upload_status(auth_token, &upload_uri, file_size, &client);
+
+        match upload_status.status().as_u16() {
+            308 => {
+                println!("Upload interrupted. Resuming.");
+                let mut continue_index: u64 = 0;
+                if let Some(range) = upload_status.headers().get("Range") {
+                    continue_index = range.to_str().unwrap()[2..].parse::<u64>().unwrap() + 1;
+                }
+                send_upload(
+                    auth_token,
+                    &upload_uri,
+                    continue_index,
+                    file_size,
+                    &filepath,
+                    &client,
+                );
+            }
+            201 => {
+                println!("Upload successful.");
+                break;
+            }
+            _ => {
+                println!("Upload failed.");
+                break;
+            }
+        }
     }
 }
 
-fn get_upload_session_uri(auth_token: &str, video_name: &str, video_size: u32) -> String {
-    let client = reqwest::blocking::Client::new();
+fn check_upload_status(
+    auth_token: &str,
+    upload_uri: &str,
+    content_length: u64,
+    client: &Client,
+) -> Response {
+    client
+        .post(upload_uri)
+        .bearer_auth(auth_token)
+        .header(CONTENT_LENGTH, 0)
+        .header("Content-Range", &format!("bytes */{}", content_length))
+        .send()
+        .unwrap()
+}
+
+fn send_upload(
+    auth_token: &str,
+    upload_uri: &str,
+    start_index: u64,
+    file_size: u64,
+    filepath: &str,
+    client: &Client,
+) {
+    let mut file = File::open(&filepath).unwrap();
+    file.seek(SeekFrom::Start(start_index)).unwrap();
+
+    let _ = client
+        .put(upload_uri)
+        .bearer_auth(auth_token)
+        .header(CONTENT_LENGTH, file_size - start_index)
+        .header(
+            "Content-Range",
+            &format!("bytes {}-{}/{}", start_index, file_size - 1, file_size),
+        )
+        .body(file)
+        .send();
+}
+
+fn get_upload_session_uri(auth_token: &str, video_name: &str, video_size: u64) -> String {
+    let client = Client::new();
     let req_body = json!({
       "snippet": {
         "title": video_name,
