@@ -11,7 +11,7 @@ pub fn download_twitch_video<P: AsRef<Path>>(video_id: &str, save_folder: P) -> 
 
     let (token, sig) = get_access_token(&get_client_id(), video_id);
     let m3u8_url = get_m3u8_url(video_id, &token, &sig);
-    download_video(&m3u8_url, &path);
+    // download_video(&m3u8_url, &path);
 
     let size = fs::metadata(&path).unwrap().len();
 

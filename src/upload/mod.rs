@@ -3,7 +3,7 @@ mod auth;
 use crate::video::Video;
 use auth::get_auth_token;
 use reqwest::blocking::{Client, Response};
-use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE, LOCATION};
+use reqwest::header::{CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, LOCATION};
 use serde_json::json;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
@@ -36,6 +36,7 @@ impl UploadSession {
 
         loop {
             let upload_status = self.check_upload_status();
+            println!("{:?}", upload_status);
 
             match upload_status.status().as_u16() {
                 308 => {
@@ -43,7 +44,6 @@ impl UploadSession {
                     if let Some(range) = upload_status.headers().get("Range") {
                         continue_index = range.to_str().unwrap()[8..].parse::<u64>().unwrap() + 1;
                     }
-                    println!("{:?}", upload_status);
                     println!(
                         "Upload interrupted. Resuming from byte {}/{}.",
                         continue_index, self.video.size
@@ -98,7 +98,7 @@ impl UploadSession {
             .bearer_auth(&self.auth_token)
             .header(CONTENT_LENGTH, self.video.size - start_index)
             .header(
-                "Content-Range",
+                CONTENT_RANGE,
                 &format!(
                     "bytes {}-{}/{}",
                     start_index,
