@@ -83,7 +83,7 @@ impl UploadSession {
             .put(&self.upload_uri)
             .bearer_auth(&self.auth_token)
             .header(CONTENT_LENGTH, self.video.size)
-            .header(CONTENT_TYPE, "application/octet-stream")
+            .header(CONTENT_TYPE, "video/*")
             .body(file)
             .send();
     }
@@ -134,7 +134,7 @@ impl UploadSession {
             .header(CONTENT_TYPE, "application/json; charset=UTF-8")
             .header(CONTENT_LENGTH, req_body.len())
             .header("X-Upload-Content-Length", video.size)
-            .header("X-Upload-Content-Type", "application/octet-stream")
+            .header("X-Upload-Content-Type", "video/*")
             .body(req_body)
             .send()
             .unwrap();
