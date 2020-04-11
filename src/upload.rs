@@ -32,7 +32,7 @@ impl UploadSession {
 
     pub fn upload(&self) {
         // println!("Starting upload with URI: {}", upload_uri);
-        self.send_upload(0);
+        self.start_upload();
         // println!("{:?}", res);
 
         loop {
@@ -44,17 +44,20 @@ impl UploadSession {
                     if let Some(range) = upload_status.headers().get("Range") {
                         continue_index = range.to_str().unwrap()[8..].parse::<u64>().unwrap() + 1;
                     }
+                    println!("{:?}", upload_status);
                     println!(
                         "Upload interrupted. Resuming from byte {}/{}.",
                         continue_index, self.video.size
                     );
-                    self.send_upload(continue_index);
+                    self.resume_upload(continue_index);
                 }
-                201 => {
+                200 | 201 => {
+                    println!("{:?}", upload_status.text());
                     println!("Upload successful.");
                     break;
                 }
                 _ => {
+                    println!("{:?}", upload_status.text());
                     println!("Upload failed.");
                     break;
                 }
@@ -72,7 +75,20 @@ impl UploadSession {
             .unwrap()
     }
 
-    fn send_upload(&self, start_index: u64) {
+    fn start_upload(&self) {
+        let mut file = File::open(&self.video.path).unwrap();
+
+        let _ = self
+            .client
+            .put(&self.upload_uri)
+            .bearer_auth(&self.auth_token)
+            .header(CONTENT_LENGTH, self.video.size)
+            .header(CONTENT_TYPE, "application/octet-stream")
+            .body(file)
+            .send();
+    }
+
+    fn resume_upload(&self, start_index: u64) {
         let mut file = File::open(&self.video.path).unwrap();
         file.seek(SeekFrom::Start(start_index)).unwrap();
 
@@ -80,7 +96,7 @@ impl UploadSession {
             .client
             .put(&self.upload_uri)
             .bearer_auth(&self.auth_token)
-            .header(CONTENT_LENGTH, start_index - self.video.size)
+            .header(CONTENT_LENGTH, self.video.size - start_index)
             .header(
                 "Content-Range",
                 &format!(
