@@ -9,11 +9,15 @@ use std::process::{Command, Stdio};
 pub fn download_twitch_video<P: AsRef<Path>>(video_id: &str, save_folder: P) -> Video {
     let path = save_folder.as_ref().join(video_id).with_extension("mp4");
 
-    let (token, sig) = get_access_token(&get_client_id(), video_id);
-    let m3u8_url = get_m3u8_url(video_id, &token, &sig);
-    // download_video(&m3u8_url, &path);
+    if !path.exists() {
+        let (token, sig) = get_access_token(&get_client_id(), video_id);
+        let m3u8_url = get_m3u8_url(video_id, &token, &sig);
+        download_video(&m3u8_url, &path);
+    }
 
-    let size = fs::metadata(&path).unwrap().len();
+    let size = fs::metadata(&path)
+        .unwrap_or_else(|_| panic!("Downloading {} failed", path.to_string_lossy()))
+        .len();
 
     Video {
         name: video_id.to_string(),
