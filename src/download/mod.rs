@@ -10,9 +10,7 @@ pub fn download_twitch_video<P: AsRef<Path>>(video_id: &str, save_folder: P) -> 
     let path = save_folder.as_ref().join(video_id).with_extension("mp4");
 
     if !path.exists() {
-        let (token, sig) = get_access_token(&get_client_id(), video_id);
-        let m3u8_url = get_m3u8_url(video_id, &token, &sig);
-        download_video(&m3u8_url, &path);
+        download_video(video_id, &path);
     }
 
     let size = fs::metadata(&path)
@@ -59,12 +57,14 @@ fn get_m3u8_url(video_id: &str, token: &str, sig: &str) -> String {
     )
 }
 
-fn download_video(m3u8_url: &str, path: &Path) {
-    let _ = fs::create_dir_all(path.parent().unwrap());
+fn download_video(video_id: &str, path: &Path) {
+    let (token, sig) = get_access_token(&get_client_id(), video_id);
+    let m3u8_url = get_m3u8_url(video_id, &token, &sig);
+    let _ = fs::create_dir_all(path.parent().expect("Video save path cannot be root"));
     Command::new("ffmpeg")
         .args(&[
             "-i",
-            m3u8_url,
+            &m3u8_url,
             "-c",
             "copy",
             "-bsf:a",
@@ -77,5 +77,5 @@ fn download_video(m3u8_url: &str, path: &Path) {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()
-        .unwrap();
+        .expect("failed to execute ffmpeg");
 }
